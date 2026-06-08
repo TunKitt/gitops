@@ -1,0 +1,54 @@
+#!/bin/bash
+# ============================================================
+# BOOTSTRAP voi MINIKUBE --driver=none (bare-metal, chay THANG tren host)
+# Khong co lop container/VM boc ngoai -> NodePort BAM THANG host EC2,
+#   KHONG can extraPortMappings. Doi lai phai cai them runtime shim.
+# Vi K8s >=1.24 bo dockershim -> driver=none + docker CAN 'cri-dockerd'.
+# ============================================================
+set -euxo pipefail
+export DEBIAN_FRONTEND=noninteractive
+# cloud-init chay HOME khong phai /root -> ep HOME + KUBECONFIG de minikube/kubectl dung dung cho
+export HOME=/root
+export KUBECONFIG=/root/.kube/config
+export MINIKUBE_HOME=/root/.minikube
+mkdir -p /root/.kube
+
+# >>> KHAC BIET 1: can them conntrack (driver=none chay kube-proxy thang host) <<<
+apt-get update -y
+apt-get install -y docker.io curl conntrack
+systemctl enable --now docker
+
+# kubectl
+curl -sLO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+install -m 0755 kubectl /usr/local/bin/kubectl
+
+# >>> KHAC BIET 2: crictl (CLI cho CRI runtime) <<<
+CRICTL_VER="v1.30.0"
+curl -sL "https://github.com/kubernetes-sigs/cri-tools/releases/download/$${CRICTL_VER}/crictl-$${CRICTL_VER}-linux-amd64.tar.gz" \
+  | tar -C /usr/local/bin -xz
+
+# >>> KHAC BIET 3: cri-dockerd (cau noi docker <-> kubelet, thay dockershim da bi bo) <<<
+curl -sLO https://github.com/Mirantis/cri-dockerd/releases/download/v0.3.15/cri-dockerd_0.3.15.3-0.ubuntu-jammy_amd64.deb
+dpkg -i cri-dockerd_0.3.15.3-0.ubuntu-jammy_amd64.deb
+systemctl enable --now cri-docker.socket cri-docker.service
+
+# >>> KHAC BIET 4: cai 'minikube' (binary khac kind) <<<
+curl -sLo /usr/local/bin/minikube https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+chmod +x /usr/local/bin/minikube
+
+# >>> KHAC BIET 5: start bang FLAG (khong phai file yaml), driver=none, chay as root <<<
+#     driver=none => NodePort tu bam host, KHONG can map cong.
+minikube start \
+  --driver=none \
+  --container-runtime=docker \
+  --cri-socket=/var/run/cri-dockerd.sock \
+  --force
+export KUBECONFIG=/root/.kube/config
+
+# ---- Deploy PLATFORM 3-component (W9-ready). frontend NodePort 30080 dung sau ALB ----
+# Manifest inject qua base64 (tu k8s/platform.yaml) -> tranh loi heredoc long nhau.
+echo '${platform_b64}' | base64 -d > /root/platform.yaml
+kubectl apply -f /root/platform.yaml
+kubectl -n demo rollout status deploy/frontend --timeout=180s || true
+kubectl -n demo rollout status deploy/api      --timeout=180s || true
+echo "BOOTSTRAP_DONE (minikube)" > /root/ready

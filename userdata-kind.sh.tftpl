@@ -1,0 +1,48 @@
+#!/bin/bash
+# ============================================================
+# BOOTSTRAP voi KIND (Kubernetes IN Docker)
+# Node = 1 container Docker. NodePort KHONG tu ra host
+#   -> phai khai bao extraPortMappings de map ra host EC2.
+# ============================================================
+set -euxo pipefail
+export DEBIAN_FRONTEND=noninteractive
+# cloud-init chay HOME khong phai /root -> ep HOME + KUBECONFIG de kind ghi/kubectl doc dung cho
+export HOME=/root
+export KUBECONFIG=/root/.kube/config
+mkdir -p /root/.kube
+
+apt-get update -y
+apt-get install -y docker.io curl
+systemctl enable --now docker
+
+# kubectl
+curl -sLO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+install -m 0755 kubectl /usr/local/bin/kubectl
+
+# >>> KHAC BIET 1: cai 'kind' (1 binary duy nhat) <<<
+curl -sLo /usr/local/bin/kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64
+chmod +x /usr/local/bin/kind
+
+# >>> KHAC BIET 2: cau hinh cum bang FILE YAML, map cong ra host <<<
+cat > /root/kind.yaml <<'KIND'
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraPortMappings:                # <-- mau chot: dua NodePort ra host EC2
+      - containerPort: ${node_port}
+        hostPort: ${node_port}
+        protocol: TCP
+KIND
+
+# >>> KHAC BIET 3: tao cum trong Docker <<<
+kind create cluster --name lab --config /root/kind.yaml
+export KUBECONFIG=/root/.kube/config
+
+# ---- Deploy PLATFORM 3-component (W9-ready). frontend NodePort 30080 dung sau ALB ----
+# Manifest inject qua base64 (tu k8s/platform.yaml) -> tranh loi heredoc long nhau.
+echo '${platform_b64}' | base64 -d > /root/platform.yaml
+kubectl apply -f /root/platform.yaml
+kubectl -n demo rollout status deploy/frontend --timeout=180s || true
+kubectl -n demo rollout status deploy/api      --timeout=180s || true
+echo "BOOTSTRAP_DONE (kind)" > /root/ready

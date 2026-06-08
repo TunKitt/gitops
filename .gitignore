@@ -1,0 +1,13 @@
+# Terraform state (chua thong tin nhay cam, gom ca private key) - KHONG commit
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.tfstate.lock.info
+crash.log
+
+# SSH private key sinh boi tls provider
+*.pem
+
+# Bien cuc bo neu co
+*.tfvars
+!example.tfvars
