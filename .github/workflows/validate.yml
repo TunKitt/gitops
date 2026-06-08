@@ -1,0 +1,30 @@
+# CI · plan-on-PR: validate manifest K8s MOI khi mo Pull Request cham vao k8s/ hoac argocd/.
+# Khong co buoc "apply" -> vi ArgoCD moi la cai apply (pull). CI chi GAC CONG chat luong.
+name: validate
+
+on:
+  pull_request:
+    paths:
+      - "k8s/**"
+      - "argocd/**"
+  push:
+    branches: [ main ]
+    paths:
+      - "k8s/**"
+      - "argocd/**"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cai kubeconform
+        run: |
+          curl -sL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz | tar -xz
+          sudo mv kubeconform /usr/local/bin/
+
+      - name: Validate manifest (schema K8s)
+        run: |
+          # -strict: bat field la/sai chinh ta. -ignore-missing-schemas: bo qua CRD (vd Application cua ArgoCD)
+          kubeconform -strict -ignore-missing-schemas -summary -verbose k8s/ argocd/
