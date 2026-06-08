@@ -89,7 +89,7 @@ metadata:
   namespace: demo
   labels: { app: frontend }
 spec:
-  replicas: 2
+  replicas: 3
   selector: { matchLabels: { app: frontend } }
   template:
     metadata: { labels: { app: frontend } }
