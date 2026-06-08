@@ -1,0 +1,46 @@
+# Observability · OpenTelemetry Collector (deployment).
+# Nhan OTLP tu app (api) -> day TRACES sang Jaeger. (metrics/logs them o lop sau)
+# Config day la MERGE len config mac dinh cua chart (chi them exporter jaeger + sua pipeline traces).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: otel-collector
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: default
+  source:
+    repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
+    chart: opentelemetry-collector
+    targetRevision: "0.158.1"
+    helm:
+      values: |
+        mode: deployment
+        replicaCount: 1
+        image:
+          repository: otel/opentelemetry-collector-contrib   # ban contrib (du exporter)
+        resources:
+          requests: { cpu: 50m, memory: 128Mi }
+          limits:   { memory: 256Mi }
+        presets:
+          logsCollection: { enabled: false }
+          kubernetesAttributes: { enabled: false }
+        # MERGE len config mac dinh: them exporter Jaeger + cho traces pipeline xuat sang do
+        config:
+          exporters:
+            otlp/jaeger:
+              endpoint: jaeger:4317
+              tls:
+                insecure: true
+          service:
+            pipelines:
+              traces:
+                exporters: [otlp/jaeger, debug]
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions:
+      - CreateNamespace=true

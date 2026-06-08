@@ -1,0 +1,39 @@
+# Observability · Jaeger all-in-one (traces backend, memory storage - hop lab).
+# Service 'jaeger': OTLP grpc 4317 / http 4318 ; UI 16686.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: jaeger
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://jaegertracing.github.io/helm-charts
+    chart: jaeger
+    targetRevision: "4.11.0"
+    helm:
+      values: |
+        provisionDataStore:
+          cassandra: false
+          elasticsearch: false
+          kafka: false
+        storage:
+          type: memory
+        allInOne:
+          enabled: true
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits:   { memory: 400Mi }
+        # tat che do production (chay all-in-one cho gon)
+        agent: { enabled: false }
+        collector: { enabled: false }
+        query: { enabled: false }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions:
+      - CreateNamespace=true
