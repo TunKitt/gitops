@@ -1,5 +1,5 @@
-# api: service loi (HPA + graceful shutdown). KHONG khai 'replicas' vi HPA so huu so ban
-# (tranh ArgoCD va HPA "danh nhau" ve replicas). Bump RAM limit -> tranh OOM CrashLoopBackOff.
+# api: app Flask CO INSTRUMENT (OTel) — phat trace -> Jaeger, expose /metrics -> Prometheus,
+# co ERROR_RATE de inject loi 5% 500. Anh build tren EC2 + kind load (imagePullPolicy: IfNotPresent).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,23 +15,31 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
         - name: api
-          image: registry.k8s.io/hpa-example
-          ports: [ { containerPort: 80 } ]
-          lifecycle:
-            preStop:
-              exec: { command: ["sh", "-c", "sleep 5"] }
+          image: w9-api:1                 # anh build tren EC2 + kind load
+          imagePullPolicy: IfNotPresent    # dung anh da load, khong keo tu registry
+          ports:
+            - { name: http, containerPort: 8080 }
+          env:
+            - { name: OTEL_SERVICE_NAME,        value: "api" }
+            - { name: OTEL_TRACES_EXPORTER,     value: "otlp" }
+            - { name: OTEL_METRICS_EXPORTER,    value: "none" }   # metrics dung /metrics (Prometheus scrape)
+            - { name: OTEL_LOGS_EXPORTER,       value: "none" }   # log ra stdout (Loki sau)
+            - { name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://jaeger.monitoring:4317" }
+            - { name: OTEL_EXPORTER_OTLP_PROTOCOL, value: "grpc" }
+            - { name: OTEL_PYTHON_LOG_CORRELATION, value: "true" } # nhet trace_id vao log
+            - { name: ERROR_RATE,               value: "0" }      # 0 = khong loi; doi "0.05" = 5% loi
           readinessProbe:
-            httpGet: { path: /, port: 80 }
+            httpGet: { path: /healthz, port: 8080 }
             initialDelaySeconds: 5
             periodSeconds: 5
           livenessProbe:
-            httpGet: { path: /, port: 80 }
-            initialDelaySeconds: 20
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 15
             periodSeconds: 10
             failureThreshold: 6
           resources:
-            requests: { cpu: "100m", memory: "128Mi" }
-            limits:   { cpu: "500m", memory: "256Mi" }    # tang tu 128Mi -> 256Mi
+            requests: { cpu: "50m", memory: "96Mi" }
+            limits:   { cpu: "300m", memory: "256Mi" }
 ---
 apiVersion: v1
 kind: Service
@@ -43,8 +51,23 @@ metadata:
 spec:
   selector: { app: api }
   ports:
-    - port: 8080
-      targetPort: 80
+    - { name: http, port: 8080, targetPort: 8080 }
+---
+# Prometheus scrape /metrics cua api (kube-prometheus-stack nhat moi ServiceMonitor)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: api
+  namespace: demo
+  labels: { app: api }
+  annotations: { argocd.argoproj.io/sync-wave: "3" }
+spec:
+  selector:
+    matchLabels: { app: api }
+  endpoints:
+    - port: http          # ten cong trong Service
+      path: /metrics
+      interval: 15s
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
@@ -53,14 +76,9 @@ metadata:
   namespace: demo
   annotations: { argocd.argoproj.io/sync-wave: "2" }
 spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: api
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: api }
   minReplicas: 2
   maxReplicas: 10
   metrics:
     - type: Resource
-      resource:
-        name: cpu
-        target: { type: Utilization, averageUtilization: 50 }
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 50 } }
