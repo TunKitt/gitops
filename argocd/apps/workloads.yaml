@@ -1,0 +1,26 @@
+# Nhom 2: workloads (api + frontend + worker). Sync SAU config (wave 1).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: workloads
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/TunKitt/gitops.git
+    targetRevision: main
+    path: k8s/workloads
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: demo
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [ CreateNamespace=true ]
+  # api dung HPA so huu replicas -> bo qua khac biet ve replicas (tranh ArgoCD keo nguoc)
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      name: api
+      jsonPointers: [ /spec/replicas ]

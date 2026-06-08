@@ -1,0 +1,18 @@
+# ROOT (app-of-apps): tro vao thu muc argocd/apps -> tu sinh ra cac Application con
+# (config + workloads). Bootstrap 1 lan -> ca he thong duoc tao theo dung thu tu.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/TunKitt/gitops.git
+    targetRevision: main
+    path: argocd/apps
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
