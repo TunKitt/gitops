@@ -3,6 +3,7 @@
 name: validate
 
 on:
+  workflow_dispatch:        # cho phep bam "Run workflow" bang tay
   pull_request:
     paths:
       - "k8s/**"
