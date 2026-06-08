@@ -1,0 +1,67 @@
+# SLO + burn-rate cho 'api'. kube-prometheus-stack nhat moi PrometheusRule (ruleSelector = {}).
+# SLO availability 99.5% -> error budget = 1 - 0.995 = 0.005 (0.5%).
+# SLI lay tu metric flask_http_request_total / _duration_seconds_* (prometheus_flask_exporter).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: api-slo
+  namespace: demo
+  labels: { app: api, role: slo }
+  annotations: { argocd.argoproj.io/sync-wave: "3" }
+spec:
+  groups:
+    # ---------- 1) RECORDING RULES: ti le LOI theo nhieu cua so ----------
+    - name: api-sli
+      interval: 15s
+      rules:
+        - record: api:err_ratio:1m
+          expr: |
+            sum(rate(flask_http_request_total{namespace="demo",status=~"5.."}[1m]))
+            / clamp_min(sum(rate(flask_http_request_total{namespace="demo"}[1m])), 0.001)
+        - record: api:err_ratio:5m
+          expr: |
+            sum(rate(flask_http_request_total{namespace="demo",status=~"5.."}[5m]))
+            / clamp_min(sum(rate(flask_http_request_total{namespace="demo"}[5m])), 0.001)
+        - record: api:err_ratio:30m
+          expr: |
+            sum(rate(flask_http_request_total{namespace="demo",status=~"5.."}[30m]))
+            / clamp_min(sum(rate(flask_http_request_total{namespace="demo"}[30m])), 0.001)
+        - record: api:err_ratio:1h
+          expr: |
+            sum(rate(flask_http_request_total{namespace="demo",status=~"5.."}[1h]))
+            / clamp_min(sum(rate(flask_http_request_total{namespace="demo"}[1h])), 0.001)
+        - record: api:err_ratio:6h
+          expr: |
+            sum(rate(flask_http_request_total{namespace="demo",status=~"5.."}[6h]))
+            / clamp_min(sum(rate(flask_http_request_total{namespace="demo"}[6h])), 0.001)
+        # SLI latency: ti le request < 300ms (SLO p95 < 300ms ~ 99% request < 300ms)
+        - record: api:latency_fast_ratio:5m
+          expr: |
+            sum(rate(flask_http_request_duration_seconds_bucket{namespace="demo",le="0.3"}[5m]))
+            / clamp_min(sum(rate(flask_http_request_duration_seconds_count{namespace="demo"}[5m])), 0.001)
+
+    # ---------- 2) BURN-RATE ALERTS ----------
+    # burn rate = err_ratio / budget(0.005). Alert fire khi CA cua so dai VA ngan vuot nguong.
+    - name: api-slo-burn
+      rules:
+        # PRODUCTION fast: 14.4x budget (=7.2% loi) over 1h & 5m  -> bao su co GAP
+        - alert: ApiAvailabilityFastBurn
+          expr: api:err_ratio:1h > (14.4 * 0.005) and api:err_ratio:5m > (14.4 * 0.005)
+          for: 2m
+          labels: { severity: page, slo: availability }
+          annotations:
+            summary: "api: FAST burn (1h & 5m) - dot error budget rat nhanh"
+        # PRODUCTION slow: 6x budget (=3% loi) over 6h & 30m  -> bao ro ri CHAM
+        - alert: ApiAvailabilitySlowBurn
+          expr: api:err_ratio:6h > (6 * 0.005) and api:err_ratio:30m > (6 * 0.005)
+          for: 15m
+          labels: { severity: ticket, slo: availability }
+          annotations:
+            summary: "api: SLOW burn (6h & 30m) - ro ri error budget"
+        # DEMO: nhay de inject 5% loi FIRE < 10 phut (2x budget = 1% over 5m & 1m)
+        - alert: ApiAvailabilityDemoBurn
+          expr: api:err_ratio:5m > (2 * 0.005) and api:err_ratio:1m > (2 * 0.005)
+          for: 1m
+          labels: { severity: page, slo: availability, demo: "true" }
+          annotations:
+            summary: "api: burn-rate DEMO fire (err 5m & 1m > 1%) - dung de test inject 5% 500"
