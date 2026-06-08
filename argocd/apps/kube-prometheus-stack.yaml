@@ -1,0 +1,58 @@
+# Observability · Đợt 1: Prometheus + Grafana + Alertmanager (cho SLO + burn rate).
+# Cai bang ArgoCD tu Helm chart (GitOps). CRD lon -> ServerSideApply=true.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: "86.2.0"
+    helm:
+      values: |
+        # --- Prometheus (tia cho cum nho) ---
+        prometheus:
+          prometheusSpec:
+            retention: 2h
+            # QUAN TRONG: nhat ServiceMonitor + PrometheusRule do MINH tao (cho api + burn-rate),
+            # khong chi cua chart nay:
+            serviceMonitorSelectorNilUsesHelmValues: false
+            podMonitorSelectorNilUsesHelmValues: false
+            ruleSelectorNilUsesHelmValues: false
+            resources:
+              requests: { cpu: 100m, memory: 300Mi }
+              limits:   { memory: 900Mi }
+        # --- Grafana ---
+        grafana:
+          adminPassword: "admin"
+          resources:
+            requests: { cpu: 50m, memory: 96Mi }
+            limits:   { memory: 256Mi }
+        # --- Alertmanager (1 ban, cho burn-rate alert) ---
+        alertmanager:
+          alertmanagerSpec:
+            resources:
+              requests: { cpu: 25m, memory: 64Mi }
+              limits:   { memory: 128Mi }
+        # --- bot cac exporter nang ---
+        prometheus-node-exporter:
+          resources:
+            requests: { cpu: 20m, memory: 32Mi }
+            limits:   { memory: 64Mi }
+        kube-state-metrics:
+          resources:
+            requests: { cpu: 20m, memory: 48Mi }
+            limits:   { memory: 96Mi }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true     # CRD Prometheus Operator rat lon -> can SSA
